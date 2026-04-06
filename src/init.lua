@@ -33,7 +33,9 @@ ffi.cdef [[
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
-local lib = ffi.load(here .. "libcurl.so")
+local sep = string.sub(package.config, 1, 1)
+local libname = sep == "\\" and "curl.dll" or (jit.os == "OSX" and "libcurl.dylib" or "libcurl.so")
+local lib = ffi.load(here .. libname)
 
 lib.curl_global_init(3) -- CURL_GLOBAL_ALL
 

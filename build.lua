@@ -1,9 +1,11 @@
 local outDir = os.getenv("LDE_OUTPUT_DIR")
 local sep = string.sub(package.config, 1, 1)
 local isWindows = sep == "\\"
+local isMac = not isWindows and io.popen("uname"):read("*l") == "Darwin"
 local scriptDir = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])")
 local curlSrc = scriptDir .. "vendor" .. sep .. "curl"
-local outLib = outDir .. sep .. (isWindows and "curl.dll" or "libcurl.so")
+local libName = isWindows and "curl.dll" or isMac and "libcurl.dylib" or "libcurl.so"
+local outLib = outDir .. sep .. libName
 
 -- skip if already built
 if io.open(outLib, "rb") then return end
@@ -19,5 +21,6 @@ if isWindows then
     exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
     exec('cd "' .. curlSrc .. '" && autoreconf -fi && ./configure --disable-static --enable-shared --with-openssl --without-libpsl && make -j$(nproc)')
-    exec('cp "' .. curlSrc .. '/lib/.libs/libcurl.so" "' .. outLib .. '"')
+    local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
+    exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 end
