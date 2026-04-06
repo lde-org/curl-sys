@@ -1,0 +1,9 @@
+{
+	"name": "curl-sys",
+	"version": "0.1.0",
+	"devDependencies": {
+		"lde-test": {
+			"git": "https://github.com/lde-org/lde"
+		}
+	}
+}
