@@ -16,7 +16,7 @@ local function exec(cmd)
 end
 
 if isWindows then
-    exec('cmake -S "' .. curlSrc .. '" -B "' .. curlSrc .. '\\build" -DBUILD_SHARED_LIBS=ON -DBUILD_CURL_EXE=OFF -DCURL_USE_LIBPSL=OFF')
+    exec('cmake -S "' .. curlSrc .. '" -B "' .. curlSrc .. '\\build" -DBUILD_SHARED_LIBS=ON -DBUILD_CURL_EXE=OFF -DCURL_USE_LIBPSL=OFF -DOPENSSL_ROOT_DIR="C:\\Program Files\\OpenSSL"')
     exec('cmake --build "' .. curlSrc .. '\\build" --config Release')
     exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
