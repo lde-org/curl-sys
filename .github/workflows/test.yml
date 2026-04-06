@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            deps: sudo apt-get install -y cmake libssl-dev
+          - os: ubuntu-22.04-arm
+            deps: sudo apt-get install -y cmake libssl-dev
+          - os: windows-latest
+          - os: windows-11-arm
+          - os: macos-15
+            deps: brew install cmake openssl
+          - os: macos-15-intel
+            deps: brew install cmake openssl
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        if: matrix.deps
+        run: ${{ matrix.deps }}
+
+      - name: Setup cmake (Windows ARM64)
+        if: matrix.os == 'windows-11-arm'
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Setup lde
+        uses: lde-org/setup-lde@master
+        with:
+          version: nightly
+
+      - name: Run tests
+        run: lde test
