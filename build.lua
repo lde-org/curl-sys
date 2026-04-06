@@ -14,10 +14,10 @@ local function exec(cmd)
 end
 
 if isWindows then
-    exec('cmake -S "' .. curlSrc .. '" -B "' .. curlSrc .. '\\build" -DBUILD_SHARED_LIBS=ON -DBUILD_CURL_EXE=OFF')
+    exec('cmake -S "' .. curlSrc .. '" -B "' .. curlSrc .. '\\build" -DBUILD_SHARED_LIBS=ON -DBUILD_CURL_EXE=OFF -DCURL_USE_LIBPSL=OFF')
     exec('cmake --build "' .. curlSrc .. '\\build" --config Release')
     exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
-    exec('cd "' .. curlSrc .. '" && autoreconf -fi && ./configure --disable-static --enable-shared --with-openssl && make -j$(nproc)')
+    exec('cd "' .. curlSrc .. '" && autoreconf -fi && ./configure --disable-static --enable-shared --with-openssl --without-libpsl && make -j$(nproc)')
     exec('cp "' .. curlSrc .. '/lib/.libs/libcurl.so" "' .. outLib .. '"')
 end
