@@ -86,6 +86,20 @@ local INFO = {
 --- @field password string|nil Password for auth
 --- @field verify_ssl boolean|nil Verify SSL cert (default: true)
 
+-- pre-allocated output slots reused across requests
+local status_out = ffi.new("long[1]")
+local time_out   = ffi.new("double[1]")
+local ct_out     = ffi.new("char*[1]")
+local url_out    = ffi.new("char*[1]")
+
+-- persistent write buffer and callback
+local buf = buffer.new()
+local writecb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
+	local len = size * nmemb
+	buf:putcdata(ptr, len)
+	return len
+end)
+
 --- Perform an HTTP request.
 --- @param opts CurlOptions
 --- @return CurlResponse
@@ -93,13 +107,7 @@ local function request(opts)
 	local handle = lib.curl_easy_init()
 	assert(handle ~= nil, "curl_easy_init failed")
 
-	-- collect response body
-	local buf = buffer.new()
-	local writecb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
-		local len = size * nmemb
-		buf:putcdata(ptr, len)
-		return len
-	end)
+	buf:reset()
 
 	lib.curl_easy_setopt(handle, OPT.URL, opts.url)
 	lib.curl_easy_setopt(handle, OPT.WRITEFUNCTION, writecb)
@@ -138,16 +146,9 @@ local function request(opts)
 	local code = lib.curl_easy_perform(handle)
 	assert(code == 0, ffi.string(lib.curl_easy_strerror(code)))
 
-	local status_out = ffi.new("long[1]")
 	lib.curl_easy_getinfo(handle, INFO.RESPONSE_CODE, status_out)
-
-	local time_out = ffi.new("double[1]")
 	lib.curl_easy_getinfo(handle, INFO.TOTAL_TIME, time_out)
-
-	local ct_out = ffi.new("char*[1]")
 	lib.curl_easy_getinfo(handle, INFO.CONTENT_TYPE, ct_out)
-
-	local url_out = ffi.new("char*[1]")
 	lib.curl_easy_getinfo(handle, INFO.EFFECTIVE_URL, url_out)
 
 	local result = {
@@ -159,7 +160,6 @@ local function request(opts)
 	}
 
 	if slist then lib.curl_slist_free_all(slist) end
-	writecb:free()
 	lib.curl_easy_cleanup(handle)
 
 	return result
