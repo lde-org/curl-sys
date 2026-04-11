@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+local buffer = require("string.buffer")
 
 ffi.cdef [[
   typedef void CURL;
@@ -93,10 +94,10 @@ local function request(opts)
 	assert(handle ~= nil, "curl_easy_init failed")
 
 	-- collect response body
-	local chunks = {}
+	local buf = buffer.new()
 	local writecb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
 		local len = size * nmemb
-		table.insert(chunks, ffi.string(ptr, len))
+		buf:putcdata(ptr, len)
 		return len
 	end)
 
@@ -151,7 +152,7 @@ local function request(opts)
 
 	local result = {
 		status        = tonumber(status_out[0]),
-		body          = table.concat(chunks),
+		body          = buf:tostring(),
 		total_time    = tonumber(time_out[0]),
 		content_type  = ct_out[0] ~= nil and ffi.string(ct_out[0]) or nil,
 		effective_url = url_out[0] ~= nil and ffi.string(url_out[0]) or nil,
