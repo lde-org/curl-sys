@@ -100,13 +100,15 @@ local writecb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
 	return len
 end)
 
+-- persistent curl handle reused across requests
+local handle = lib.curl_easy_init()
+assert(handle ~= nil, "curl_easy_init failed")
+
 --- Perform an HTTP request.
 --- @param opts CurlOptions
 --- @return CurlResponse
 local function request(opts)
-	local handle = lib.curl_easy_init()
-	assert(handle ~= nil, "curl_easy_init failed")
-
+	lib.curl_easy_reset(handle)
 	buf:reset()
 
 	lib.curl_easy_setopt(handle, OPT.URL, opts.url)
@@ -134,9 +136,7 @@ local function request(opts)
 	local method = opts.method and opts.method:upper()
 	if opts.body then
 		lib.curl_easy_setopt(handle, OPT.POSTFIELDS, opts.body)
-		if not method or method == "POST" then
-			method = nil -- curl defaults to POST when POSTFIELDS is set
-		else
+		if method and method ~= "POST" then
 			lib.curl_easy_setopt(handle, OPT.CUSTOMREQUEST, method)
 		end
 	elseif method and method ~= "GET" then
@@ -160,16 +160,8 @@ local function request(opts)
 	}
 
 	if slist then lib.curl_slist_free_all(slist) end
-	lib.curl_easy_cleanup(handle)
 
 	return result
-end
-
-local function merge(base, over)
-	local t = {}
-	for k, v in pairs(base) do t[k] = v end
-	for k, v in pairs(over) do t[k] = v end
-	return t
 end
 
 --- @class curl
@@ -178,6 +170,14 @@ end
 --- @field post fun(url: string, body: string, opts: CurlOptions|nil): CurlResponse
 return {
 	request = request,
-	get = function(url, opts) return request(merge({ url = url, method = "GET" }, opts or {})) end,
-	post = function(url, body, opts) return request(merge({ url = url, method = "POST", body = body }, opts or {})) end,
+	get = function(url, opts)
+		local o = opts or {}
+		o.url = url; o.method = "GET"
+		return request(o)
+	end,
+	post = function(url, body, opts)
+		local o = opts or {}
+		o.url = url; o.method = "POST"; o.body = body
+		return request(o)
+	end,
 }
