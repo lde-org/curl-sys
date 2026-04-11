@@ -32,7 +32,7 @@ test.it("request with custom method works", function()
 end)
 
 test.it("download writes file to disk", function()
-	local path = "/tmp/curl-sys-test-download.html"
+	local path = os.tmpname()
 	curl.download("https://example.com", path)
 	local f = io.open(path, "r")
 	test.truthy(f)
