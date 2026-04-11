@@ -31,6 +31,10 @@ ffi.cdef [[
 
   CURLcode curl_global_init(long flags);
   void curl_global_cleanup(void);
+
+  typedef struct FILE FILE;
+  FILE *fopen(const char *path, const char *mode);
+  int fclose(FILE *f);
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
@@ -168,6 +172,7 @@ end
 --- @field request fun(opts: CurlOptions): CurlResponse
 --- @field get fun(url: string, opts: CurlOptions|nil): CurlResponse
 --- @field post fun(url: string, body: string, opts: CurlOptions|nil): CurlResponse
+--- @field download fun(url: string, path: string): nil
 return {
 	request = request,
 	get = function(url, opts)
@@ -179,5 +184,18 @@ return {
 		local o = opts or {}
 		o.url = url; o.method = "POST"; o.body = body
 		return request(o)
+	end,
+	download = function(url, path)
+		local f = ffi.C.fopen(path, "wb")
+		assert(f ~= nil, "fopen failed: " .. path)
+		lib.curl_easy_reset(handle)
+		lib.curl_easy_setopt(handle, OPT.URL, url)
+		lib.curl_easy_setopt(handle, OPT.FOLLOWLOCATION, 1)
+		lib.curl_easy_setopt(handle, OPT.SSL_VERIFYPEER, 1)
+		lib.curl_easy_setopt(handle, OPT.SSL_VERIFYHOST, 2)
+		lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
+		local code = lib.curl_easy_perform(handle)
+		ffi.C.fclose(f)
+		assert(code == 0, ffi.string(lib.curl_easy_strerror(code)))
 	end,
 }
