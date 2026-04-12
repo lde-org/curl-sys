@@ -72,7 +72,8 @@ if jit.os ~= "Windows" then
 	else
 		for _, p in ipairs({ "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem" }) do
 			if io.open(p, "rb") then
-				defaultCainfo = p; break
+				defaultCainfo = p
+				break
 			end
 		end
 	end
