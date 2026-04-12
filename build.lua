@@ -26,7 +26,7 @@ if isWindows then
 	exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
 	-- build openssl statically
-	local arch = jit.arch == "x64" and "x86_64" or "aarch64"
+	local arch = jit.arch == "x64" and "x86_64" or (isMac and "arm64" or "aarch64")
 	local opensslTarget = isMac and ("darwin64-" .. arch .. "-cc") or ("linux-" .. arch)
 	exec('cd "' .. opensslSrc .. '" && ./Configure ' .. opensslTarget .. ' no-shared no-tests --prefix="' .. opensslOut .. '" && make -j$(nproc) && make install_sw')
 
