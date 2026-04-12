@@ -57,6 +57,7 @@ jobs:
           echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r29" >> $GITHUB_ENV
 
       - name: Setup lde
+        if: "!matrix.android"
         uses: lde-org/setup-lde@master
         with:
           version: nightly
@@ -75,7 +76,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /tmp/termux-android.tar
-          key: termux-android-v1
+          key: termux-android-v2
 
       - name: Setup Android test image
         if: matrix.android
@@ -87,7 +88,7 @@ jobs:
             docker run --privileged --platform linux/arm64 --name termux-build \
               -e DEBIAN_FRONTEND=noninteractive \
               termux/termux-docker:aarch64 \
-              bash -c "apt update && apt upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold && apt install -y git clang curl zip make cmake"
+              bash -c "apt update && apt upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold && apt install -y git clang curl zip make cmake && curl -fsSL https://lde.sh/install | sh -s -- --nightly"
             docker commit termux-build termux-android:latest
             docker rm termux-build
             docker save termux-android:latest -o /tmp/termux-android.tar
