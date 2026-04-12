@@ -45,7 +45,7 @@ local lib = ffi.load(here .. libname)
 lib.curl_global_init(3) -- CURL_GLOBAL_ALL
 
 -- CURLoption constants
-local OPT = {
+local OPT        = {
 	URL            = 10002,
 	WRITEFUNCTION  = 20011,
 	WRITEDATA      = 10001,
@@ -63,7 +63,7 @@ local OPT = {
 }
 
 -- CURLINFO constants
-local INFO = {
+local INFO       = {
 	RESPONSE_CODE = 0x200002,
 	TOTAL_TIME    = 0x300003,
 	CONTENT_TYPE  = 0x100012,
@@ -97,20 +97,20 @@ local ct_out     = ffi.new("char*[1]")
 local url_out    = ffi.new("char*[1]")
 
 -- persistent write buffer and callback
-local buf = buffer.new()
-local writecb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
+local buf        = buffer.new()
+local writecb    = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
 	local len = size * nmemb
 	buf:putcdata(ptr, len)
 	return len
 end)
 
 -- persistent curl handle reused across requests
-local handle = lib.curl_easy_init()
+local handle     = lib.curl_easy_init()
 assert(handle ~= nil, "curl_easy_init failed")
 
 --- Perform an HTTP request.
 --- @param opts CurlOptions
---- @return CurlResponse
+--- @return CurlResponse|nil, string|nil
 local function request(opts)
 	lib.curl_easy_reset(handle)
 	buf:reset()
@@ -148,7 +148,10 @@ local function request(opts)
 	end
 
 	local code = lib.curl_easy_perform(handle)
-	assert(code == 0, ffi.string(lib.curl_easy_strerror(code)))
+	if code ~= 0 then
+		if slist then lib.curl_slist_free_all(slist) end
+		return nil, ffi.string(lib.curl_easy_strerror(code))
+	end
 
 	lib.curl_easy_getinfo(handle, INFO.RESPONSE_CODE, status_out)
 	lib.curl_easy_getinfo(handle, INFO.TOTAL_TIME, time_out)
@@ -165,37 +168,62 @@ local function request(opts)
 
 	if slist then lib.curl_slist_free_all(slist) end
 
-	return result
+	return result, nil
 end
 
---- @class curl
---- @field request fun(opts: CurlOptions): CurlResponse
---- @field get fun(url: string, opts: CurlOptions|nil): CurlResponse
---- @field post fun(url: string, body: string, opts: CurlOptions|nil): CurlResponse
---- @field download fun(url: string, path: string): nil
-return {
-	request = request,
-	get = function(url, opts)
-		local o = opts or {}
-		o.url = url; o.method = "GET"
-		return request(o)
-	end,
-	post = function(url, body, opts)
-		local o = opts or {}
-		o.url = url; o.method = "POST"; o.body = body
-		return request(o)
-	end,
-	download = function(url, path)
-		local f = ffi.C.fopen(path, "wb")
-		assert(f ~= nil, "fopen failed: " .. path)
-		lib.curl_easy_reset(handle)
-		lib.curl_easy_setopt(handle, OPT.URL, url)
-		lib.curl_easy_setopt(handle, OPT.FOLLOWLOCATION, 1)
-		lib.curl_easy_setopt(handle, OPT.SSL_VERIFYPEER, 1)
-		lib.curl_easy_setopt(handle, OPT.SSL_VERIFYHOST, 2)
-		lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
-		local code = lib.curl_easy_perform(handle)
-		ffi.C.fclose(f)
-		assert(code == 0, ffi.string(lib.curl_easy_strerror(code)))
-	end,
-}
+local curl = {}
+
+--- @param opts CurlOptions
+--- @return CurlResponse|nil, string|nil
+curl.request = request
+
+--- @param url string
+--- @param opts CurlOptions|nil
+--- @return CurlResponse|nil, string|nil
+function curl.get(url, opts)
+	local o = opts or {}
+	o.url = url
+	o.method = "GET"
+
+	return request(o)
+end
+
+--- @param url string
+--- @param body string
+--- @param opts CurlOptions|nil
+--- @return CurlResponse|nil, string|nil
+function curl.post(url, body, opts)
+	local o = opts or {}
+	o.url = url
+	o.method = "POST"
+	o.body = body
+
+	return request(o)
+end
+
+--- @param url string
+--- @param path string
+--- @return boolean, string|nil
+function curl.download(url, path)
+	local f = ffi.C.fopen(path, "wb")
+	if f == nil then
+		return false, "fopen failed: " .. path
+	end
+
+	lib.curl_easy_reset(handle)
+	lib.curl_easy_setopt(handle, OPT.URL, url)
+	lib.curl_easy_setopt(handle, OPT.FOLLOWLOCATION, 1)
+	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYPEER, 1)
+	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYHOST, 2)
+	lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
+	local code = lib.curl_easy_perform(handle)
+	ffi.C.fclose(f)
+
+	if code ~= 0 then
+		return false, ffi.string(lib.curl_easy_strerror(code))
+	end
+
+	return true, nil
+end
+
+return curl
