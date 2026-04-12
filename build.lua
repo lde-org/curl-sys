@@ -52,7 +52,8 @@ else
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 	local strip = (isAndroid and ndkRoot) and (ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin/llvm-strip") or "strip"
-	exec(strip .. ' --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr "' .. outLib .. '"')
+	local stripFlags = isMac and "-x" or "--strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr"
+	exec(strip .. ' ' .. stripFlags .. ' "' .. outLib .. '"')
 
 	-- generate embedded CA bundle as a Lua file
 	local cacertLua = outDir .. "/cacert.lua"
