@@ -103,4 +103,4 @@ jobs:
             -w /workspace \
             -e ANDROID_NDK_ROOT=/workspace/android-ndk-r29 \
             termux-android:latest \
-            bash -c "lde test"
+            bash -c "/data/data/com.termux/files/home/.lde/lde test"
