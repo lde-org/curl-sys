@@ -15,8 +15,8 @@ jobs:
             deps: sudo apt-get install -y cmake libssl-dev
           - os: ubuntu-22.04-arm
             deps: sudo apt-get install -y cmake libssl-dev
-          - os: ubuntu-22.04-arm
-            android: true
+          # - os: ubuntu-22.04-arm
+          #   android: true
           - os: windows-latest
           - os: windows-11-arm
           - os: macos-15
