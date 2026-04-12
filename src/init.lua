@@ -35,6 +35,12 @@ ffi.cdef [[
   typedef struct FILE FILE;
   FILE *fopen(const char *path, const char *mode);
   int fclose(FILE *f);
+
+  struct curl_blob {
+    void *data;
+    size_t len;
+    unsigned int flags;
+  };
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
@@ -60,10 +66,12 @@ local OPT = {
 	SSL_VERIFYPEER = 64,
 	SSL_VERIFYHOST = 81,
 	CAINFO         = 10065,
+	CAINFO_BLOB    = 40309,
 }
 
 -- on non-Windows, point curl at a CA bundle (bundled cacert.pem next to the lib, or system fallback)
 local defaultCainfo
+local defaultCainfoBlob
 if jit.os ~= "Windows" then
 	local bundled = here .. "cacert.pem"
 
@@ -74,6 +82,16 @@ if jit.os ~= "Windows" then
 			if io.open(p, "rb") then
 				defaultCainfo = p
 				break
+			end
+		end
+
+		if not defaultCainfo then
+			local ok, pem = pcall(require, "cacert")
+			if ok then
+				defaultCainfoBlob       = ffi.new("struct curl_blob")
+				defaultCainfoBlob.data  = ffi.cast("void *", pem)
+				defaultCainfoBlob.len   = #pem
+				defaultCainfoBlob.flags = 0
 			end
 		end
 	end
@@ -141,7 +159,11 @@ local function request(opts)
 	setlong(OPT.FOLLOWLOCATION, (opts.followRedirects == false) and 0 or 1)
 	setlong(OPT.SSL_VERIFYPEER, (opts.verifySsl == false) and 0 or 1)
 	setlong(OPT.SSL_VERIFYHOST, (opts.verifySsl == false) and 0 or 2)
-	if defaultCainfo then lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo) end
+	if defaultCainfo then
+		lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo)
+	elseif defaultCainfoBlob then
+		lib.curl_easy_setopt(handle, OPT.CAINFO_BLOB, defaultCainfoBlob)
+	end
 
 	if opts.timeout then setlong(OPT.TIMEOUT, opts.timeout) end
 	if opts.verbose then setlong(OPT.VERBOSE, 1) end
@@ -238,7 +260,11 @@ function curl.download(url, path, opts)
 	setlong(OPT.FOLLOWLOCATION, 1)
 	setlong(OPT.SSL_VERIFYPEER, (opts and opts.verifySsl == false) and 0 or 1)
 	setlong(OPT.SSL_VERIFYHOST, (opts and opts.verifySsl == false) and 0 or 2)
-	if defaultCainfo then lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo) end
+	if defaultCainfo then
+		lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo)
+	elseif defaultCainfoBlob then
+		lib.curl_easy_setopt(handle, OPT.CAINFO_BLOB, defaultCainfoBlob)
+	end
 	lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
 	local code = lib.curl_easy_perform(handle)
 	ffi.C.fclose(f)

@@ -24,9 +24,15 @@ else
     local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
     exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 
-    -- download Mozilla CA bundle so SSL verification works out of the box
-    local cacert = outDir .. "/cacert.pem"
-    if not io.open(cacert, "rb") then
-        exec('curl -sSL https://curl.se/ca/cacert.pem -o "' .. cacert .. '"')
+    -- generate embedded CA bundle as a Lua file
+    local cacertLua = outDir .. "/cacert.lua"
+    if not io.open(cacertLua, "rb") then
+        local tmp = outDir .. "/cacert.pem"
+        exec('curl -sSL https://curl.se/ca/cacert.pem -o "' .. tmp .. '"')
+        local pem = assert(io.open(tmp, "rb")):read("*a")
+        local f = assert(io.open(cacertLua, "wb"))
+        f:write("return [=[\n" .. pem .. "]=]\n")
+        f:close()
+        os.remove(tmp)
     end
 end
