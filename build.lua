@@ -23,7 +23,7 @@ if isWindows then
 	exec('cmake --build "' .. curlSrc .. '\\build" --config Release')
 	exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
-	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl --without-libpsl && make -j$(nproc)')
+	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl --without-libpsl --disable-manual && make -j$(nproc) -C lib')
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 
