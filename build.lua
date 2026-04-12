@@ -51,7 +51,7 @@ else
 	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && ' .. curlEnv .. 'CFLAGS="-g0" CONFIG_SHELL="' .. sh .. '" ./configure ' .. curlMin .. curlHost .. ' && make -j$(nproc) -C lib')
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
-	local strip = isAndroid and (ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin/llvm-strip") or "strip"
+	local strip = (isAndroid and ndkRoot) and (ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin/llvm-strip") or "strip"
 	exec(strip .. ' --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr "' .. outLib .. '"')
 
 	-- generate embedded CA bundle as a Lua file
