@@ -25,12 +25,27 @@ if isWindows then
 	exec('cmake --build "' .. curlSrc .. '\\build" --config Release')
 	exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
-	-- build openssl statically
 	local arch = jit.arch == "x64" and "x86_64" or (isMac and "arm64" or "aarch64")
-	local opensslTarget = isMac and ("darwin64-" .. arch .. "-cc") or ("linux-" .. arch)
-	exec('cd "' .. opensslSrc .. '" && perl Configure ' .. opensslTarget .. ' no-shared no-tests no-docs no-apps --prefix="' .. opensslOut .. '" && make -j$(nproc) && make install_sw')
+	local ndkRoot = os.getenv("ANDROID_NDK_ROOT")
+	local opensslTarget, curlEnv, curlHost
 
-	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl="' .. opensslOut .. '" --without-libpsl --without-zstd --without-brotli --without-nghttp2 --without-nghttp3 --without-libidn2 --without-zlib --without-libgsasl --disable-ldap --disable-manual && make -j$(nproc) -C lib')
+	if ndkRoot then
+		local toolchain = ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin"
+		local ndkEnv = 'PATH="' .. toolchain .. ':$PATH" ANDROID_NDK_ROOT="' .. ndkRoot .. '"'
+		opensslTarget = "android-arm64"
+		exec('cd "' .. opensslSrc .. '" && ' .. ndkEnv .. ' perl Configure ' .. opensslTarget .. ' no-shared no-tests no-docs no-apps --prefix="' .. opensslOut .. '" && ' .. ndkEnv .. ' make -j$(nproc) && make install_sw')
+		local cc = toolchain .. "/aarch64-linux-android24-clang"
+		local cxx = toolchain .. "/aarch64-linux-android24-clang++"
+		curlEnv = 'CC="' .. cc .. '" CXX="' .. cxx .. '" AR="' .. toolchain .. '/llvm-ar" RANLIB="' .. toolchain .. '/llvm-ranlib" '
+		curlHost = " --host=aarch64-linux-android"
+	else
+		opensslTarget = isMac and ("darwin64-" .. arch .. "-cc") or ("linux-" .. arch)
+		exec('cd "' .. opensslSrc .. '" && perl Configure ' .. opensslTarget .. ' no-shared no-tests no-docs no-apps --prefix="' .. opensslOut .. '" && make -j$(nproc) && make install_sw')
+		curlEnv = ""
+		curlHost = ""
+	end
+
+	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && ' .. curlEnv .. 'CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl="' .. opensslOut .. '" --without-libpsl --without-zstd --without-brotli --without-nghttp2 --without-nghttp3 --without-libidn2 --without-zlib --without-libgsasl --disable-ldap --disable-manual' .. curlHost .. ' && make -j$(nproc) -C lib')
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 
