@@ -30,7 +30,7 @@ else
 	local opensslTarget = isMac and ("darwin64-" .. arch .. "-cc") or ("linux-" .. arch)
 	exec('cd "' .. opensslSrc .. '" && perl Configure ' .. opensslTarget .. ' no-shared no-tests no-docs no-apps --prefix="' .. opensslOut .. '" && make -j$(nproc) && make install_sw')
 
-	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl="' .. opensslOut .. '" --without-libpsl --without-zstd --without-brotli --without-nghttp2 --without-nghttp3 --without-libidn2 --disable-manual && make -j$(nproc) -C lib')
+	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl="' .. opensslOut .. '" --without-libpsl --without-zstd --without-brotli --without-nghttp2 --without-nghttp3 --without-libidn2 --without-zlib --without-libgsasl --without-ldap --disable-manual && make -j$(nproc) -C lib')
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 
