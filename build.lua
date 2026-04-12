@@ -23,4 +23,10 @@ else
     exec('cd "' .. curlSrc .. '" && autoreconf -fi && ./configure --disable-static --enable-shared --with-openssl --without-libpsl && make -j$(nproc)')
     local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
     exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
+
+    -- download Mozilla CA bundle so SSL verification works out of the box
+    local cacert = outDir .. "/cacert.pem"
+    if not io.open(cacert, "rb") then
+        exec('curl -sSL https://curl.se/ca/cacert.pem -o "' .. cacert .. '"')
+    end
 end

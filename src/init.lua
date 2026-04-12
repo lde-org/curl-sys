@@ -38,14 +38,13 @@ ffi.cdef [[
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
-local sep = string.sub(package.config, 1, 1)
-local libname = sep == "\\" and "curl.dll" or (jit.os == "OSX" and "libcurl.dylib" or "libcurl.so")
+local libname = jit.os == "Windows" and "curl.dll" or (jit.os == "OSX" and "libcurl.dylib" or "libcurl.so")
 local lib = ffi.load(here .. libname)
 
 lib.curl_global_init(3) -- CURL_GLOBAL_ALL
 
 -- CURLoption constants
-local OPT        = {
+local OPT = {
 	URL            = 10002,
 	WRITEFUNCTION  = 20011,
 	WRITEDATA      = 10001,
@@ -60,10 +59,27 @@ local OPT        = {
 	PASSWORD       = 10174,
 	SSL_VERIFYPEER = 64,
 	SSL_VERIFYHOST = 81,
+	CAINFO         = 10065,
 }
 
+-- on non-Windows, point curl at a CA bundle (bundled cacert.pem next to the lib, or system fallback)
+local defaultCainfo
+if jit.os ~= "Windows" then
+	local bundled = here .. "cacert.pem"
+
+	if io.open(bundled, "rb") then
+		defaultCainfo = bundled
+	else
+		for _, p in ipairs({ "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem" }) do
+			if io.open(p, "rb") then
+				defaultCainfo = p; break
+			end
+		end
+	end
+end
+
 -- CURLINFO constants
-local INFO       = {
+local INFO      = {
 	RESPONSE_CODE = 0x200002,
 	TOTAL_TIME    = 0x300003,
 	CONTENT_TYPE  = 0x100012,
@@ -73,9 +89,9 @@ local INFO       = {
 --- @class CurlResponse
 --- @field status number HTTP status code
 --- @field body string Response body
---- @field content_type string|nil Content-Type header value
---- @field effective_url string|nil Final URL after redirects
---- @field total_time number Total request time in seconds
+--- @field contentType string|nil Content-Type header value
+--- @field effectiveUrl string|nil Final URL after redirects
+--- @field totalTime number Total request time in seconds
 
 --- @class CurlOptions
 --- @field url string Request URL
@@ -83,30 +99,34 @@ local INFO       = {
 --- @field headers table<string,string>|nil Extra request headers
 --- @field body string|nil Request body (sets POST if method not specified)
 --- @field timeout number|nil Timeout in seconds
---- @field follow_redirects boolean|nil Follow redirects (default: true)
+--- @field followRedirects boolean|nil Follow redirects (default: true)
 --- @field verbose boolean|nil Enable verbose output
 --- @field useragent string|nil User-Agent string
 --- @field username string|nil Username for auth
 --- @field password string|nil Password for auth
---- @field verify_ssl boolean|nil Verify SSL cert (default: true)
+--- @field verifySsl boolean|nil Verify SSL cert (default: true)
 
 -- pre-allocated output slots reused across requests
-local status_out = ffi.new("long[1]")
-local time_out   = ffi.new("double[1]")
-local ct_out     = ffi.new("char*[1]")
-local url_out    = ffi.new("char*[1]")
+local statusOut = ffi.new("long[1]")
+local timeOut   = ffi.new("double[1]")
+local ctOut     = ffi.new("char*[1]")
+local urlOut    = ffi.new("char*[1]")
 
 -- persistent write buffer and callback
-local buf        = buffer.new()
-local writecb    = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
+local buf       = buffer.new()
+local writeCb   = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
 	local len = size * nmemb
 	buf:putcdata(ptr, len)
 	return len
 end)
 
 -- persistent curl handle reused across requests
-local handle     = lib.curl_easy_init()
+local handle    = lib.curl_easy_init()
 assert(handle ~= nil, "curl_easy_init failed")
+
+local function setlong(opt, val)
+	lib.curl_easy_setopt(handle, opt, ffi.cast("long", val))
+end
 
 --- Perform an HTTP request.
 --- @param opts CurlOptions
@@ -116,13 +136,14 @@ local function request(opts)
 	buf:reset()
 
 	lib.curl_easy_setopt(handle, OPT.URL, opts.url)
-	lib.curl_easy_setopt(handle, OPT.WRITEFUNCTION, writecb)
-	lib.curl_easy_setopt(handle, OPT.FOLLOWLOCATION, (opts.follow_redirects == false) and 0 or 1)
-	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYPEER, (opts.verify_ssl == false) and 0 or 1)
-	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYHOST, (opts.verify_ssl == false) and 0 or 2)
+	lib.curl_easy_setopt(handle, OPT.WRITEFUNCTION, writeCb)
+	setlong(OPT.FOLLOWLOCATION, (opts.followRedirects == false) and 0 or 1)
+	setlong(OPT.SSL_VERIFYPEER, (opts.verifySsl == false) and 0 or 1)
+	setlong(OPT.SSL_VERIFYHOST, (opts.verifySsl == false) and 0 or 2)
+	if defaultCainfo then lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo) end
 
-	if opts.timeout then lib.curl_easy_setopt(handle, OPT.TIMEOUT, opts.timeout) end
-	if opts.verbose then lib.curl_easy_setopt(handle, OPT.VERBOSE, 1) end
+	if opts.timeout then setlong(OPT.TIMEOUT, opts.timeout) end
+	if opts.verbose then setlong(OPT.VERBOSE, 1) end
 	if opts.useragent then lib.curl_easy_setopt(handle, OPT.USERAGENT, opts.useragent) end
 	if opts.username then lib.curl_easy_setopt(handle, OPT.USERNAME, opts.username) end
 	if opts.password then lib.curl_easy_setopt(handle, OPT.PASSWORD, opts.password) end
@@ -153,17 +174,17 @@ local function request(opts)
 		return nil, ffi.string(lib.curl_easy_strerror(code))
 	end
 
-	lib.curl_easy_getinfo(handle, INFO.RESPONSE_CODE, status_out)
-	lib.curl_easy_getinfo(handle, INFO.TOTAL_TIME, time_out)
-	lib.curl_easy_getinfo(handle, INFO.CONTENT_TYPE, ct_out)
-	lib.curl_easy_getinfo(handle, INFO.EFFECTIVE_URL, url_out)
+	lib.curl_easy_getinfo(handle, INFO.RESPONSE_CODE, statusOut)
+	lib.curl_easy_getinfo(handle, INFO.TOTAL_TIME, timeOut)
+	lib.curl_easy_getinfo(handle, INFO.CONTENT_TYPE, ctOut)
+	lib.curl_easy_getinfo(handle, INFO.EFFECTIVE_URL, urlOut)
 
 	local result = {
-		status        = tonumber(status_out[0]),
-		body          = buf:tostring(),
-		total_time    = tonumber(time_out[0]),
-		content_type  = ct_out[0] ~= nil and ffi.string(ct_out[0]) or nil,
-		effective_url = url_out[0] ~= nil and ffi.string(url_out[0]) or nil,
+		status       = tonumber(statusOut[0]),
+		body         = buf:tostring(),
+		totalTime    = tonumber(timeOut[0]),
+		contentType  = ctOut[0] ~= nil and ffi.string(ctOut[0]) or nil,
+		effectiveUrl = urlOut[0] ~= nil and ffi.string(urlOut[0]) or nil,
 	}
 
 	if slist then lib.curl_slist_free_all(slist) end
@@ -203,8 +224,9 @@ end
 
 --- @param url string
 --- @param path string
+--- @param opts CurlOptions|nil
 --- @return boolean, string|nil
-function curl.download(url, path)
+function curl.download(url, path, opts)
 	local f = ffi.C.fopen(path, "wb")
 	if f == nil then
 		return false, "fopen failed: " .. path
@@ -212,9 +234,10 @@ function curl.download(url, path)
 
 	lib.curl_easy_reset(handle)
 	lib.curl_easy_setopt(handle, OPT.URL, url)
-	lib.curl_easy_setopt(handle, OPT.FOLLOWLOCATION, 1)
-	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYPEER, 1)
-	lib.curl_easy_setopt(handle, OPT.SSL_VERIFYHOST, 2)
+	setlong(OPT.FOLLOWLOCATION, 1)
+	setlong(OPT.SSL_VERIFYPEER, (opts and opts.verifySsl == false) and 0 or 1)
+	setlong(OPT.SSL_VERIFYHOST, (opts and opts.verifySsl == false) and 0 or 2)
+	if defaultCainfo then lib.curl_easy_setopt(handle, OPT.CAINFO, defaultCainfo) end
 	lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
 	local code = lib.curl_easy_perform(handle)
 	ffi.C.fclose(f)
