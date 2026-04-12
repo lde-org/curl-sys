@@ -46,6 +46,7 @@ ffi.cdef [[
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
 local libname = jit.os == "Windows" and "curl.dll" or (jit.os == "OSX" and "libcurl.dylib" or "libcurl.so")
 local lib = ffi.load(here .. libname)
+local isAndroid = os.getenv("ANDROID_ROOT") ~= nil
 
 lib.curl_global_init(3) -- CURL_GLOBAL_ALL
 
@@ -66,7 +67,7 @@ local OPT = {
 	SSL_VERIFYPEER = 64,
 	SSL_VERIFYHOST = 81,
 	CAINFO         = 10065,
-	CAINFO_BLOB    = 40309,
+	CAINFO_BLOB    = 40309
 }
 
 -- on non-Windows, point curl at a CA bundle (bundled cacert.pem next to the lib, or system fallback)
@@ -78,7 +79,14 @@ if jit.os ~= "Windows" then
 	if io.open(bundled, "rb") then
 		defaultCainfo = bundled
 	else
-		for _, p in ipairs({ "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem" }) do
+		local certs ---@type string[]
+		if isAndroid then
+			certs = { "/data/data/com.termux/files/usr/etc/tls/cert.pem" }
+		else
+			certs = { "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem" }
+		end
+
+		for _, p in ipairs(certs) do
 			if io.open(p, "rb") then
 				defaultCainfo = p
 				break
@@ -102,7 +110,7 @@ local INFO      = {
 	RESPONSE_CODE = 0x200002,
 	TOTAL_TIME    = 0x300003,
 	CONTENT_TYPE  = 0x100012,
-	EFFECTIVE_URL = 0x100001,
+	EFFECTIVE_URL = 0x100001
 }
 
 --- @class CurlResponse
@@ -207,7 +215,7 @@ local function request(opts)
 		body         = buf:tostring(),
 		totalTime    = tonumber(timeOut[0]),
 		contentType  = ctOut[0] ~= nil and ffi.string(ctOut[0]) or nil,
-		effectiveUrl = urlOut[0] ~= nil and ffi.string(urlOut[0]) or nil,
+		effectiveUrl = urlOut[0] ~= nil and ffi.string(urlOut[0]) or nil
 	}
 
 	if slist then lib.curl_slist_free_all(slist) end
