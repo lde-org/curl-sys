@@ -6,6 +6,8 @@ local isAndroid = os.getenv("ANDROID_ROOT") ~= nil
 local sh = isAndroid and "/data/data/com.termux/files/usr/bin/sh" or "/bin/sh"
 local scriptDir = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])")
 local curlSrc = scriptDir .. "vendor" .. sep .. "curl"
+local opensslSrc = scriptDir .. "vendor" .. sep .. "openssl"
+local opensslOut = opensslSrc .. sep .. "build"
 local libName = isWindows and "curl.dll" or isMac and "libcurl.dylib" or "libcurl.so"
 local outLib = outDir .. sep .. libName
 
@@ -23,7 +25,12 @@ if isWindows then
 	exec('cmake --build "' .. curlSrc .. '\\build" --config Release')
 	exec('copy "' .. curlSrc .. '\\build\\lib\\Release\\libcurl.dll" "' .. outLib .. '"')
 else
-	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl --without-libpsl --disable-manual && make -j$(nproc) -C lib')
+	-- build openssl statically
+	local arch = jit.arch == "x64" and "x86_64" or "aarch64"
+	local opensslTarget = isMac and ("darwin64-" .. arch .. "-cc") or ("linux-" .. arch)
+	exec('cd "' .. opensslSrc .. '" && ./Configure ' .. opensslTarget .. ' no-shared no-tests --prefix="' .. opensslOut .. '" && make -j$(nproc) && make install_sw')
+
+	exec('cd "' .. curlSrc .. '" && SHELL="' .. sh .. '" autoreconf -fi && CONFIG_SHELL="' .. sh .. '" ./configure --disable-static --enable-shared --with-openssl="' .. opensslOut .. '" --without-libpsl --disable-manual && make -j$(nproc) -C lib')
 	local builtLib = isMac and (curlSrc .. "/lib/.libs/libcurl.dylib") or (curlSrc .. "/lib/.libs/libcurl.so")
 	exec('cp "' .. builtLib .. '" "' .. outLib .. '"')
 
