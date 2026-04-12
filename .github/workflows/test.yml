@@ -15,6 +15,8 @@ jobs:
             deps: sudo apt-get install -y cmake libssl-dev
           - os: ubuntu-22.04-arm
             deps: sudo apt-get install -y cmake libssl-dev
+          - os: ubuntu-22.04-arm
+            android: true
           - os: windows-latest
           - os: windows-11-arm
           - os: macos-15
@@ -37,10 +39,67 @@ jobs:
         if: matrix.os == 'windows-11-arm'
         uses: jwlawson/actions-setup-cmake@v2
 
+      - name: Cache Android NDK
+        if: matrix.android
+        id: cache-android-ndk
+        uses: actions/cache@v5
+        with:
+          path: android-ndk-r29
+          key: android-ndk-r29-aarch64
+
+      - name: Setup Android NDK
+        if: matrix.android
+        run: |
+          if [[ "${{ steps.cache-android-ndk.outputs.cache-hit }}" != "true" ]]; then
+            wget -q https://github.com/lzhiyong/termux-ndk/releases/download/android-ndk/android-ndk-r29-aarch64.7z
+            7z x android-ndk-r29-aarch64.7z -o. > /dev/null
+          fi
+          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r29" >> $GITHUB_ENV
+
       - name: Setup lde
         uses: lde-org/setup-lde@master
         with:
           version: nightly
 
       - name: Run tests
+        if: "!matrix.android"
         run: lde test
+
+      - name: Fix workspace permissions (Android)
+        if: matrix.android
+        run: chmod -R a+rw ${{ github.workspace }}
+
+      - name: Cache Android test image
+        if: matrix.android
+        id: cache-android-image
+        uses: actions/cache@v5
+        with:
+          path: /tmp/termux-android.tar
+          key: termux-android-v1
+
+      - name: Setup Android test image
+        if: matrix.android
+        run: |
+          if [[ "${{ steps.cache-android-image.outputs.cache-hit }}" == "true" ]]; then
+            docker load -i /tmp/termux-android.tar
+          else
+            docker rm -f termux-build 2>/dev/null || true
+            docker run --privileged --platform linux/arm64 --name termux-build \
+              -e DEBIAN_FRONTEND=noninteractive \
+              termux/termux-docker:aarch64 \
+              bash -c "apt update && apt upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold && apt install -y git clang curl zip make cmake"
+            docker commit termux-build termux-android:latest
+            docker rm termux-build
+            docker save termux-android:latest -o /tmp/termux-android.tar
+          fi
+
+      - name: Run tests (Android)
+        if: matrix.android
+        run: |
+          docker run --rm --privileged \
+            --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e ANDROID_NDK_ROOT=/workspace/android-ndk-r29 \
+            termux-android:latest \
+            bash -c "lde test"
