@@ -29,7 +29,7 @@ else
 	local ndkRoot = os.getenv("ANDROID_NDK_ROOT")
 	local opensslTarget, curlEnv, curlHost
 
-	if ndkRoot then
+	if isAndroid then
 		local toolchain = ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin"
 		local ndkEnv = 'PATH="' .. toolchain .. ':$PATH" ANDROID_NDK_ROOT="' .. ndkRoot .. '"'
 		opensslTarget = "android-arm64"
