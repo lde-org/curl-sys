@@ -1,41 +1,6 @@
 local test = require("lde-test")
 local curl = require("curl-sys")
 
-do
-	local ffi = require("ffi")
-	print("DEBUG jit.os=" .. jit.os .. " jit.arch=" .. jit.arch)
-	print("DEBUG ANDROID_ROOT=" .. tostring(os.getenv("ANDROID_ROOT")))
-	print("DEBUG TMPDIR=" .. tostring(os.getenv("TMPDIR")))
-	print("DEBUG os.tmpname type=" .. type(os.tmpname))
-	local ok, val = pcall(os.tmpname)
-	print("DEBUG os.tmpname() ok=" .. tostring(ok) .. " val=" .. tostring(val))
-	print("DEBUG package.path=" .. package.path)
-	-- find where curl-sys init.lua lives
-	local curlHere = debug.getinfo(curl.get, "S").source:sub(2):match("(.*[/\\])") or ""
-	print("DEBUG curl-sys dir=" .. curlHere)
-	print("DEBUG cacert.pem exists=" .. tostring(io.open(curlHere .. "cacert.pem", "rb") ~= nil))
-	print("DEBUG cacert.lua exists=" .. tostring(io.open(curlHere .. "cacert.lua", "rb") ~= nil))
-	local ok2, pem = pcall(require, "cacert")
-	print("DEBUG require cacert ok=" .. tostring(ok2) .. " type=" .. type(pem))
-	-- check system ca paths
-	for _, p in ipairs({"/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem", "/data/data/com.termux/files/usr/etc/tls/cert.pem"}) do
-		print("DEBUG ca path " .. p .. " exists=" .. tostring(io.open(p, "rb") ~= nil))
-	end
-end
-
-do
-	local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
-	local curlHere = debug.getinfo(curl.get, "S").source:sub(2):match("(.*[/\\])") or ""
-	print("DEBUG test dir: " .. here)
-	print("DEBUG curl-sys dir: " .. curlHere)
-	print("DEBUG package.path: " .. package.path)
-	local bundled = curlHere .. "cacert.pem"
-	print("DEBUG cacert.pem exists: " .. tostring(io.open(bundled, "rb") ~= nil))
-	print("DEBUG ANDROID_ROOT: " .. tostring(os.getenv("ANDROID_ROOT")))
-	print("DEBUG TMPDIR: " .. tostring(os.getenv("TMPDIR")))
-	print("DEBUG os.tmpname: " .. tostring(os.tmpname()))
-end
-
 test.it("GET returns 200 for lde.sh", function()
 	local res, err = curl.get("https://lde.sh")
 	test.falsy(err)
@@ -58,7 +23,7 @@ end)
 
 test.it("POST sends body and returns 200", function()
 	local res, err = curl.post("https://httpbin.org/post", "hello=world", {
-		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
+		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
 	})
 	test.falsy(err)
 	test.equal(res.status, 200)
