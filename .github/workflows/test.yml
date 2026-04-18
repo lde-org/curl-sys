@@ -37,6 +37,7 @@ jobs:
         if: "!matrix.android"
         run: lde test
 
+      # Needed otherwise created lde.lock will be unable to be read
       - name: Fix workspace permissions (Android)
         if: matrix.android
         run: |
