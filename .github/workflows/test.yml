@@ -13,7 +13,6 @@ jobs:
         include:
           - os: ubuntu-22.04
           - os: ubuntu-22.04-arm
-            deps: sudo apt-get install -y ninja-build # Not included by arm build
           - os: ubuntu-22.04-arm
             android: true
           - os: windows-latest
@@ -27,14 +26,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Install dependencies
-        if: matrix.deps
-        run: ${{ matrix.deps }}
-
-      # - name: Setup cmake (Windows ARM64)
-      #   if: matrix.os == 'windows-11-arm'
-      #   uses: jwlawson/actions-setup-cmake@v2
 
       - name: Setup lde
         if: "!matrix.android"
