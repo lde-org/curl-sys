@@ -28,21 +28,14 @@ jobs:
           submodules: recursive
 
       - name: Setup lde
-        if: "!matrix.android"
         uses: lde-org/setup-lde@master
         with:
           version: nightly
+          platform: ${{ matrix.android && 'Android' || '' }}
 
       - name: Run tests
         if: "!matrix.android"
         run: lde test
-
-      - name: Setup lde (Android)
-        if: matrix.android
-        uses: lde-org/setup-lde@master
-        with:
-          version: nightly
-          platform: Android
 
       - name: Fix workspace permissions (Android)
         if: matrix.android
@@ -50,7 +43,7 @@ jobs:
           chmod -R a+rw ${{ github.workspace }}
           cp ~/.lde/lde ${{ github.workspace }}/lde
 
-      - name: Cache Android test image
+      - name: Cache test image (Android)
         if: matrix.android
         id: cache-android-image
         uses: actions/cache@v5
@@ -58,27 +51,21 @@ jobs:
           path: /tmp/termux-android.tar
           key: termux-android-v6
 
-      - name: Setup Android test image
+      - name: Run tests (Android)
         if: matrix.android
         run: |
-          if [[ "${{ steps.cache-android-image.outputs.cache-hit }}" == "true" ]]; then
-            docker load -i /tmp/termux-android.tar
-          else
-            docker rm -f termux-build 2>/dev/null || true
-            docker run --privileged --platform linux/arm64 --name termux-build \
-              -e DEBIAN_FRONTEND=noninteractive \
-              termux/termux-docker:aarch64 \
+          if [[ "${{ steps.cache-android-image.outputs.cache-hit }}" != "true" ]]; then
+            docker run --privileged --platform linux/arm64 \
+              --name termux-build termux/termux-docker:aarch64 \
               bash -c "apt update && apt install -y clang cmake ninja openssl"
             docker commit termux-build termux-android:latest
             docker rm termux-build
             docker save termux-android:latest -o /tmp/termux-android.tar
           fi
 
-      - name: Run tests (Android)
-        if: matrix.android
-        run: |
-          docker run --rm --privileged \
-            --platform linux/arm64 \
+          docker load -i /tmp/termux-android.tar
+
+          docker run --rm --privileged --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             termux-android:latest \
