@@ -37,9 +37,18 @@ jobs:
         if: "!matrix.android"
         run: lde test
 
+      - name: Setup lde (Android)
+        if: matrix.android
+        uses: lde-org/setup-lde@master
+        with:
+          version: nightly
+          platform: Android
+
       - name: Fix workspace permissions (Android)
         if: matrix.android
-        run: chmod -R a+rw ${{ github.workspace }}
+        run: |
+          chmod -R a+rw ${{ github.workspace }}
+          cp ~/.lde/lde ${{ github.workspace }}/lde
 
       - name: Cache Android test image
         if: matrix.android
@@ -59,7 +68,7 @@ jobs:
             docker run --privileged --platform linux/arm64 --name termux-build \
               -e DEBIAN_FRONTEND=noninteractive \
               termux/termux-docker:aarch64 \
-              bash -c "apt update && apt install -y git clang curl zip make cmake ninja openssl && curl -fsSL https://lde.sh/install | sh -s -- --nightly"
+              bash -c "apt update && apt install -y clang cmake ninja openssl"
             docker commit termux-build termux-android:latest
             docker rm termux-build
             docker save termux-android:latest -o /tmp/termux-android.tar
@@ -73,4 +82,4 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             termux-android:latest \
-            bash -c "/data/data/com.termux/files/home/.lde/lde test"
+            bash -c "/workspace/lde test"
