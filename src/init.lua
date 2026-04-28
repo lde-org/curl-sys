@@ -14,6 +14,7 @@ ffi.cdef [[
   } curl_slist;
 
   typedef size_t (*curl_write_callback)(char *ptr, size_t size, size_t nmemb, void *userdata);
+  typedef int (*curl_xferinfo_callback)(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
 
   /* CURLoption values (CINIT macro: type*10000 + num) */
   /* OBJECTPOINT = 10000, FUNCTIONPOINT = 20000, LONG = 0, OFF_T = 30000 */
@@ -52,22 +53,24 @@ lib.curl_global_init(3) -- CURL_GLOBAL_ALL
 
 -- CURLoption constants
 local OPT = {
-	URL            = 10002,
-	WRITEFUNCTION  = 20011,
-	WRITEDATA      = 10001,
-	HTTPHEADER     = 10023,
-	POSTFIELDS     = 10015,
-	CUSTOMREQUEST  = 10036,
-	FOLLOWLOCATION = 52,
-	TIMEOUT        = 13,
-	VERBOSE        = 41,
-	USERAGENT      = 10018,
-	USERNAME       = 10173,
-	PASSWORD       = 10174,
-	SSL_VERIFYPEER = 64,
-	SSL_VERIFYHOST = 81,
-	CAINFO         = 10065,
-	CAINFO_BLOB    = 40309
+	URL              = 10002,
+	WRITEFUNCTION    = 20011,
+	WRITEDATA        = 10001,
+	HTTPHEADER       = 10023,
+	POSTFIELDS       = 10015,
+	CUSTOMREQUEST    = 10036,
+	FOLLOWLOCATION   = 52,
+	TIMEOUT          = 13,
+	VERBOSE          = 41,
+	USERAGENT        = 10018,
+	USERNAME         = 10173,
+	PASSWORD         = 10174,
+	SSL_VERIFYPEER   = 64,
+	SSL_VERIFYHOST   = 81,
+	CAINFO           = 10065,
+	CAINFO_BLOB      = 40309,
+	NOPROGRESS       = 43,
+	XFERINFOFUNCTION = 20219
 }
 
 -- on non-Windows, point curl at a CA bundle (bundled cacert.pem next to the lib, or system fallback)
@@ -113,6 +116,8 @@ local INFO      = {
 	EFFECTIVE_URL = 0x100001
 }
 
+--- @alias CurlProgressCallback fun(dltotal: number, dlnow: number, ultotal: number, ulnow: number): boolean|number|nil
+
 --- @class CurlResponse
 --- @field status number HTTP status code
 --- @field body string Response body
@@ -132,6 +137,7 @@ local INFO      = {
 --- @field username string|nil Username for auth
 --- @field password string|nil Password for auth
 --- @field verifySsl boolean|nil Verify SSL cert (default: true)
+--- @field progress CurlProgressCallback|nil Progress callback; return truthy to abort
 
 -- pre-allocated output slots reused across requests
 local statusOut = ffi.new("long[1]")
@@ -178,6 +184,15 @@ local function request(opts)
 	if opts.useragent then lib.curl_easy_setopt(handle, OPT.USERAGENT, opts.useragent) end
 	if opts.username then lib.curl_easy_setopt(handle, OPT.USERNAME, opts.username) end
 	if opts.password then lib.curl_easy_setopt(handle, OPT.PASSWORD, opts.password) end
+
+	local progressCb
+	if opts.progress then
+		progressCb = ffi.cast("curl_xferinfo_callback", function(_, dltotal, dlnow, ultotal, ulnow)
+			return opts.progress(tonumber(dltotal), tonumber(dlnow), tonumber(ultotal), tonumber(ulnow)) and 1 or 0
+		end)
+		setlong(OPT.NOPROGRESS, 0)
+		lib.curl_easy_setopt(handle, OPT.XFERINFOFUNCTION, progressCb)
+	end
 
 	-- headers
 	local slist = nil
@@ -274,6 +289,17 @@ function curl.download(url, path, opts)
 		lib.curl_easy_setopt(handle, OPT.CAINFO_BLOB, defaultCainfoBlob)
 	end
 	lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
+
+	local progressCb
+	if opts and opts.progress then
+		progressCb = ffi.cast("curl_xferinfo_callback", function(_, dltotal, dlnow, ultotal, ulnow)
+			return opts.progress(tonumber(dltotal), tonumber(dlnow), tonumber(ultotal), tonumber(ulnow)) and 1 or 0
+		end)
+
+		setlong(OPT.NOPROGRESS, 0)
+		lib.curl_easy_setopt(handle, OPT.XFERINFOFUNCTION, progressCb)
+	end
+
 	local code = lib.curl_easy_perform(handle)
 	ffi.C.fclose(f)
 
