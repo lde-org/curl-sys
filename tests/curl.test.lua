@@ -124,3 +124,178 @@ test.it("download progress callback can abort", function()
 	test.falsy(ok)
 	test.equal(count, 1)
 end)
+
+-- ── Batch (multi) transfers ────────────────────────────────────────────────
+
+test.it("batch runs parallel GETs and preserves add order", function()
+	local b, err = curl.batch()
+	test.falsy(err)
+	test.truthy(b)
+	test.equal(b:add("https://httpbin.org/get"), 1)
+	test.equal(b:add("https://httpbin.org/get"), 2)
+	test.equal(b:add("https://httpbin.org/get"), 3)
+
+	local results = b:runAll()
+	b:close()
+
+	test.equal(#results, 3)
+	for _, r in ipairs(results) do
+		test.equal(r.ok, true)
+		test.equal(r.status, 200)
+		test.truthy(r.body:find("url"))
+		test.truthy(r.effectiveUrl)
+		test.truthy(r.totalTime > 0)
+	end
+end)
+
+test.it("batch POST sends body and returns 200", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/post", {
+		method = "POST",
+		body = "hello=world",
+		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
+	})
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, true)
+	test.equal(results[1].status, 200)
+	test.truthy(results[1].body:find("hello"))
+end)
+
+test.it("batch request with custom method works", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/put", {
+		method = "PUT",
+		body = "{}",
+		headers = { ["Content-Type"] = "application/json" },
+	})
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, true)
+	test.equal(results[1].status, 200)
+end)
+
+test.it("batch follows redirects by default", function()
+	local b = curl.batch()
+	b:add("http://example.com")
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, true)
+	test.equal(results[1].status, 200)
+end)
+
+test.it("batch download writes files to disk", function()
+	local path1 = os.tmpname()
+	local path2 = os.tmpname()
+	local b = curl.batch()
+	b:add("https://httpbin.org/get", { path = path1 })
+	b:add("https://httpbin.org/get", { path = path2 })
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, true)
+	test.equal(results[1].path, path1)
+	test.equal(results[2].ok, true)
+	test.equal(results[2].path, path2)
+
+	for _, p in ipairs({ path1, path2 }) do
+		local f = io.open(p, "r")
+		test.truthy(f)
+		if f then
+			local content = f:read("*a")
+			f:close()
+			os.remove(p)
+			test.truthy(content:find("url"))
+		end
+	end
+end)
+
+test.it("batch reports per-transfer errors", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/get")
+	b:add("http://nonexistent.invalid.host/get", { timeout = 5 })
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, true)
+	test.equal(results[1].status, 200)
+	test.equal(results[2].ok, false)
+	test.truthy(results[2].err)
+end)
+
+test.it("batch add with unwritable path reports error", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/get", { path = "/nonexistent-dir/foo.bin" })
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, false)
+	test.truthy(results[1].err:find("fopen"))
+end)
+
+test.it("batch progress callback reports done/total", function()
+	local done, total = 0, 0
+	local b = curl.batch({
+		progress = function(d, t)
+			done = d
+			total = t
+		end,
+	})
+	b:add("https://httpbin.org/get")
+	b:add("https://httpbin.org/get")
+	local results = b:runAll()
+	b:close()
+
+	test.equal(#results, 2)
+	test.equal(total, 2)
+	test.equal(done, 2)
+end)
+
+test.it("batch per-transfer progress callback can abort", function()
+	local count = 0
+	local b = curl.batch()
+	b:add("https://httpbin.org/get", {
+		progress = function(dltotal, dlnow, ultotal, ulnow)
+			count = count + 1
+			return true -- abort immediately
+		end,
+	})
+	local results = b:runAll()
+	b:close()
+
+	test.equal(results[1].ok, false)
+	test.truthy(results[1].err)
+	test.equal(count, 1)
+end)
+
+test.it("batch pump/wait drive transfers incrementally", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/get")
+	b:add("https://httpbin.org/get")
+
+	local running = b:pump()
+	while running > 0 do
+		b:wait(50)
+		running = b:pump()
+	end
+
+	local results = b:results()
+	b:close()
+	test.equal(results[1].ok, true)
+	test.equal(results[1].status, 200)
+	test.equal(results[2].ok, true)
+	test.equal(results[2].status, 200)
+end)
+
+test.it("batch results before completion report unfinished transfers", function()
+	local b = curl.batch()
+	b:add("https://httpbin.org/get")
+	local results = b:results()
+	b:close()
+
+	test.equal(results[1].ok, false)
+	test.equal(results[1].err, "transfer not finished")
+end)

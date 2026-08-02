@@ -116,16 +116,16 @@ local INFO      = {
 	EFFECTIVE_URL = 0x100001
 }
 
---- @alias CurlProgressCallback fun(dltotal: number, dlnow: number, ultotal: number, ulnow: number): boolean|number|nil
+--- @alias curl.CurlProgressCallback fun(dltotal: number, dlnow: number, ultotal: number, ulnow: number): boolean|number|nil
 
---- @class CurlResponse
+--- @class curl.CurlResponse
 --- @field status number HTTP status code
 --- @field body string Response body
 --- @field contentType string|nil Content-Type header value
 --- @field effectiveUrl string|nil Final URL after redirects
 --- @field totalTime number Total request time in seconds
 
---- @class CurlOptions
+--- @class curl.CurlOptions
 --- @field url string Request URL
 --- @field method string|nil HTTP method (default: GET)
 --- @field headers table<string,string>|nil Extra request headers
@@ -137,7 +137,7 @@ local INFO      = {
 --- @field username string|nil Username for auth
 --- @field password string|nil Password for auth
 --- @field verifySsl boolean|nil Verify SSL cert (default: true)
---- @field progress CurlProgressCallback|nil Progress callback; return truthy to abort
+--- @field progress curl.CurlProgressCallback|nil Progress callback; return truthy to abort
 
 -- pre-allocated output slots reused across requests
 local statusOut = ffi.new("long[1]")
@@ -162,8 +162,8 @@ local function setlong(opt, val)
 end
 
 --- Perform an HTTP request.
---- @param opts CurlOptions
---- @return CurlResponse|nil, string|nil
+--- @param opts curl.CurlOptions
+--- @return curl.CurlResponse|nil, string|nil
 local function request(opts)
 	lib.curl_easy_reset(handle)
 	buf:reset()
@@ -240,13 +240,13 @@ end
 
 local curl = {}
 
---- @param opts CurlOptions
---- @return CurlResponse|nil, string|nil
+--- @param opts curl.CurlOptions
+--- @return curl.CurlResponse|nil, string|nil
 curl.request = request
 
 --- @param url string
---- @param opts CurlOptions|nil
---- @return CurlResponse|nil, string|nil
+--- @param opts curl.CurlOptions|nil
+--- @return curl.CurlResponse|nil, string|nil
 function curl.get(url, opts)
 	local o = opts or {}
 	o.url = url
@@ -257,8 +257,8 @@ end
 
 --- @param url string
 --- @param body string
---- @param opts CurlOptions|nil
---- @return CurlResponse|nil, string|nil
+--- @param opts curl.CurlOptions|nil
+--- @return curl.CurlResponse|nil, string|nil
 function curl.post(url, body, opts)
 	local o = opts or {}
 	o.url = url
@@ -270,7 +270,7 @@ end
 
 --- @param url string
 --- @param path string
---- @param opts CurlOptions|nil
+--- @param opts curl.CurlOptions|nil
 --- @return boolean, string|nil
 function curl.download(url, path, opts)
 	local f = ffi.C.fopen(path, "wb")
@@ -309,5 +309,281 @@ function curl.download(url, path, opts)
 
 	return true, nil
 end
+
+-- ── Multi (parallel) transfers ────────────────────────────────────────────
+--
+-- libcurl's multi interface lets several transfers share one socket-poll
+-- loop and reuse connections, so N independent downloads complete in roughly
+-- the time of the slowest one instead of the sum.
+
+ffi.cdef [[
+  typedef void CURLM;
+  typedef int CURLMcode;
+  typedef int curl_socket_t;
+
+  typedef enum { CURLMSG_NONE = 0, CURLMSG_DONE = 1 } CURLMSG;
+  typedef struct {
+    CURLMSG msg;
+    CURL *easy_handle;
+    union { void *whatever; CURLcode result; } data;
+  } CURLMsg;
+  typedef struct curl_waitfd { curl_socket_t fd; short events; short revents; } curl_waitfd;
+
+  CURLM *curl_multi_init(void);
+  CURLMcode curl_multi_add_handle(CURLM *multi_handle, CURL *easy_handle);
+  CURLMcode curl_multi_remove_handle(CURLM *multi_handle, CURL *easy_handle);
+  CURLMcode curl_multi_perform(CURLM *multi_handle, int *running_handles);
+  CURLMcode curl_multi_poll(CURLM *multi_handle, struct curl_waitfd extra_fds[], unsigned int extra_nfds, int timeout_ms, int *numfds);
+  CURLMsg *curl_multi_info_read(CURLM *multi_handle, int *msgs_in_queue);
+  CURLMcode curl_multi_cleanup(CURLM *multi_handle);
+  const char *curl_multi_strerror(CURLMcode errornum);
+]]
+
+local CURLMSG_DONE = 1
+
+--- Stable table key for a CURL* handle. LuaJIT hashes cdata by identity, not
+--- pointer value, so two cdata objects for the same handle would miss each
+--- other as table keys. Using the raw address as a number sidesteps that.
+local function easyKey(easy)
+	return tonumber(ffi.cast("intptr_t", easy))
+end
+
+--- Set a long-valued option on an arbitrary easy handle.
+local function setLong(easy, opt, val)
+	lib.curl_easy_setopt(easy, opt, ffi.cast("long", val))
+end
+
+--- Apply the shared options block to a transfer's easy handle.
+---@param easy CURL
+---@param state table  -- keeps Lua-side state (slist) alive for the transfer
+---@param o table
+local function setupTransferEasy(easy, state, o)
+	lib.curl_easy_setopt(easy, OPT.URL, o.url)
+	setLong(easy, OPT.FOLLOWLOCATION, (o.followRedirects == false) and 0 or 1)
+	setLong(easy, OPT.SSL_VERIFYPEER, (o.verifySsl == false) and 0 or 1)
+	setLong(easy, OPT.SSL_VERIFYHOST, (o.verifySsl == false) and 0 or 2)
+	if defaultCainfo then
+		lib.curl_easy_setopt(easy, OPT.CAINFO, defaultCainfo)
+	elseif defaultCainfoBlob then
+		lib.curl_easy_setopt(easy, OPT.CAINFO_BLOB, defaultCainfoBlob)
+	end
+	if o.timeout then setLong(easy, OPT.TIMEOUT, o.timeout) end
+	if o.useragent then lib.curl_easy_setopt(easy, OPT.USERAGENT, o.useragent) end
+	if o.username then lib.curl_easy_setopt(easy, OPT.USERNAME, o.username) end
+	if o.password then lib.curl_easy_setopt(easy, OPT.PASSWORD, o.password) end
+
+	if o.headers then
+		local slist = nil
+		for k, v in pairs(o.headers) do
+			slist = lib.curl_slist_append(slist, k .. ": " .. v)
+		end
+		lib.curl_easy_setopt(easy, OPT.HTTPHEADER, slist)
+		state.slist = slist
+	end
+
+	local method = o.method and o.method:upper()
+	if o.body then
+		lib.curl_easy_setopt(easy, OPT.POSTFIELDS, o.body)
+		if method and method ~= "POST" then
+			lib.curl_easy_setopt(easy, OPT.CUSTOMREQUEST, method)
+		end
+	elseif method and method ~= "GET" then
+		lib.curl_easy_setopt(easy, OPT.CUSTOMREQUEST, method)
+	end
+end
+
+---@class curl.CurlBatch
+---@field m CURLM
+---@field transfers table<integer, table>  -- easy handle address -> transfer state
+---@field order table
+---@field doneCount integer
+---@field opts table
+
+---@param opts table?
+---  - `progress`: fun(done: integer, total: integer)? called when a transfer finishes
+---@return curl.CurlBatch
+local Batch = {}
+Batch.__index = Batch
+
+---@param opts table?
+function Batch.new(opts)
+	local m = lib.curl_multi_init()
+	if m == nil then return nil, "curl_multi_init failed" end
+	return setmetatable({
+		m = m,
+		transfers = {},
+		order = {},
+		doneCount = 0,
+		opts = opts or {},
+	}, Batch)
+end
+
+--- Queue a transfer. Returns the 1-based index in add order (used to index `results()`).
+---@param url string
+---@param opts table?  -- { path?, method?, headers?, body?, timeout?, useragent?,
+---                    --   username?, password?, verifySsl?, followRedirects?, progress? }
+---@return integer
+function Batch:add(url, opts)
+	opts = opts or {}
+	opts.url = opts.url or url
+
+	local easy = lib.curl_easy_init()
+	if easy == nil then
+		self.order[#self.order + 1] = { result = { ok = false, err = "curl_easy_init failed" } }
+		return #self.order
+	end
+
+	local state = { url = url, opts = opts }
+
+	if opts.path then
+		local f = ffi.C.fopen(opts.path, "wb")
+		if f == nil then
+			lib.curl_easy_cleanup(easy)
+			self.order[#self.order + 1] = { result = { ok = false, err = "fopen failed: " .. opts.path } }
+			self.doneCount = self.doneCount + 1
+			return #self.order
+		end
+		state.file = f
+		lib.curl_easy_setopt(easy, OPT.WRITEDATA, f)
+	else
+		state.buf = buffer.new()
+		state.writeCb = ffi.cast("curl_write_callback", function(ptr, size, nmemb, _)
+			local len = size * nmemb
+			state.buf:putcdata(ptr, len)
+			return len
+		end)
+		lib.curl_easy_setopt(easy, OPT.WRITEFUNCTION, state.writeCb)
+	end
+
+	-- per-transfer getinfo output slots (never shared across handles)
+	state.statusOut = ffi.new("long[1]")
+	state.timeOut   = ffi.new("double[1]")
+	state.ctOut     = ffi.new("char*[1]")
+	state.urlOut    = ffi.new("char*[1]")
+
+	if opts.progress then
+		state.progressCb = ffi.cast("curl_xferinfo_callback", function(_, dltotal, dlnow, ultotal, ulnow)
+			return opts.progress(tonumber(dltotal), tonumber(dlnow), tonumber(ultotal), tonumber(ulnow)) and 1 or 0
+		end)
+		setLong(easy, OPT.NOPROGRESS, 0)
+		lib.curl_easy_setopt(easy, OPT.XFERINFOFUNCTION, state.progressCb)
+	end
+
+	setupTransferEasy(easy, state, opts)
+
+	local code = lib.curl_multi_add_handle(self.m, easy)
+	if code ~= 0 then
+		if state.file then ffi.C.fclose(state.file) end
+		if state.slist then lib.curl_slist_free_all(state.slist) end
+		lib.curl_easy_cleanup(easy)
+		self.order[#self.order + 1] = { result = { ok = false, err = "curl_multi_add_handle failed: " .. tostring(tonumber(code)) } }
+		self.doneCount = self.doneCount + 1
+		return #self.order
+	end
+
+	state.easy = easy
+	self.transfers[easyKey(easy)] = state
+	self.order[#self.order + 1] = state
+	return #self.order
+end
+
+local function cleanupTransfer(self, easy, state)
+	if state.file then ffi.C.fclose(state.file) end
+	if state.slist then lib.curl_slist_free_all(state.slist) end
+	lib.curl_multi_remove_handle(self.m, easy)
+	lib.curl_easy_cleanup(easy)
+end
+
+--- Pump the multi handle and collect finished transfers.
+---@return integer number of transfers still running
+function Batch:pump()
+	local running = ffi.new("int[1]")
+	local code = lib.curl_multi_perform(self.m, running)
+	if code ~= 0 then
+		error("curl_multi_perform failed: " .. ffi.string(lib.curl_multi_strerror(code)))
+	end
+
+	-- drain completion messages
+	local msgs = ffi.new("int[1]")
+	while true do
+		local msg = lib.curl_multi_info_read(self.m, msgs)
+		if msg == nil then break end
+		if msg.msg == CURLMSG_DONE then
+			local state = self.transfers[easyKey(msg.easy_handle)]
+			if state then
+				local easy = state.easy
+				local code2 = tonumber(msg.data.result)
+				if code2 ~= 0 then
+					state.result = { ok = false, err = ffi.string(lib.curl_easy_strerror(code2)) }
+				elseif state.file then
+					state.result = { ok = true, path = state.opts.path }
+				else
+					lib.curl_easy_getinfo(easy, INFO.RESPONSE_CODE, state.statusOut)
+					lib.curl_easy_getinfo(easy, INFO.TOTAL_TIME, state.timeOut)
+					lib.curl_easy_getinfo(easy, INFO.CONTENT_TYPE, state.ctOut)
+					lib.curl_easy_getinfo(easy, INFO.EFFECTIVE_URL, state.urlOut)
+					state.result = {
+						ok           = true,
+						status       = tonumber(state.statusOut[0]),
+						body         = state.buf:tostring(),
+						totalTime    = tonumber(state.timeOut[0]),
+						contentType  = state.ctOut[0] ~= nil and ffi.string(state.ctOut[0]) or nil,
+						effectiveUrl = state.urlOut[0] ~= nil and ffi.string(state.urlOut[0]) or nil,
+					}
+				end
+				self.transfers[easyKey(easy)] = nil
+				self.doneCount = self.doneCount + 1
+				if self.opts.progress then self.opts.progress(self.doneCount, #self.order) end
+				cleanupTransfer(self, easy, state)
+			end
+		end
+	end
+
+	return tonumber(running[0])
+end
+
+--- Block until a transfer makes progress or `ms` elapses.
+---@param ms integer?
+function Batch:wait(ms)
+	local numfds = ffi.new("int[1]")
+	lib.curl_multi_poll(self.m, nil, 0, ms or 100, numfds)
+end
+
+--- Run until all queued transfers finish.
+---@return table results in add order
+function Batch:runAll()
+	while self:pump() > 0 do
+		self:wait(100)
+	end
+	return self:results()
+end
+
+---@return table results in add order: { ok = boolean, ... }
+function Batch:results()
+	local out = {}
+	for i, state in ipairs(self.order) do
+		out[i] = state.result or { ok = false, err = "transfer not finished" }
+	end
+	return out
+end
+
+--- Free the multi handle and any transfers still attached.
+function Batch:close()
+	for key, state in pairs(self.transfers) do
+		cleanupTransfer(self, state.easy, state)
+	end
+	self.transfers = {}
+	if self.m then
+		lib.curl_multi_cleanup(self.m)
+		self.m = nil
+	end
+end
+
+---@param opts table?
+---@return curl.CurlBatch, string?
+function curl.batch(opts)
+	return Batch.new(opts)
+end
+
 
 return curl
