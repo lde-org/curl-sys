@@ -1,12 +1,8 @@
 local build = require("lde-build")
 
-local sep = string.sub(package.config, 1, 1)
 local isWindows = jit.os == "Windows"
 local isMac = jit.os == "OSX"
 local libName = isWindows and "curl.dll" or (isMac and "libcurl.dylib" or "libcurl.so")
-local outLib = build.outDir .. sep .. libName
-
-if io.open(outLib, "rb") then return end
 
 local url = "https://github.com/curl/curl/releases/download/curl-8_19_0/curl-8.19.0.tar.gz"
 local tarball = "curl-8.19.0.tar.gz"
