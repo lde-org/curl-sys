@@ -1,5 +1,7 @@
 {
 	"name": "curl-sys",
+	"description": "Bindings to curl for lde.",
+	"authors": ["David Cruz <david@bycruz.dev>"],
 	"version": "0.1.0",
 	"devDependencies": {
 		"lde-test": { "git": "https://github.com/lde-org/lde" },
