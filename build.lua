@@ -26,7 +26,12 @@ else
 	build:sh('cmake --build "' .. buildDir .. '" --parallel')
 	build:copy("curl/build/lib/" .. libName, libName)
 	local stripFlags = isMac and "-x" or "--strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr"
-	build:sh('strip ' .. stripFlags .. ' "' .. build.outDir .. '/' .. libName .. '"')
+
+	-- strip rewrites in place; write to a temp sibling and move it into place
+	-- (build:move -> fs.move -> rename, atomic) so a copy the process has
+	-- dlopen'd (mapped) is never modified underneath it.
+	build:sh('strip ' .. stripFlags .. ' -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
+	build:move(libName .. '.stripped', libName)
 
 	local cacertLua = build.outDir .. "/cacert.lua"
 	if not io.open(cacertLua, "rb") then
