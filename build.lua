@@ -25,7 +25,8 @@ else
 	build:sh('cmake -S "' .. srcDir .. '" -B "' .. buildDir .. '" -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-g0 -DBUILD_SHARED_LIBS=ON -DBUILD_CURL_EXE=OFF -DENABLE_CURL_MANUAL=OFF -DBUILD_LIBCURL_DOCS=OFF -DCURL_USE_OPENSSL=ON -DCURL_USE_LIBPSL=OFF -DCURL_ZSTD=OFF -DCURL_BROTLI=OFF -DCURL_ZLIB=OFF -DUSE_NGHTTP2=OFF -DUSE_LIBIDN2=OFF -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_FTP=ON -DCURL_DISABLE_FILE=ON -DCURL_DISABLE_TELNET=ON -DCURL_DISABLE_TFTP=ON -DCURL_DISABLE_SMTP=ON -DCURL_DISABLE_POP3=ON -DCURL_DISABLE_IMAP=ON -DCURL_DISABLE_GOPHER=ON -DCURL_DISABLE_MQTT=ON -DCURL_DISABLE_RTSP=ON -DCURL_DISABLE_DICT=ON -DCURL_DISABLE_COOKIES=ON')
 	build:sh('cmake --build "' .. buildDir .. '" --parallel')
 	build:copy("curl/build/lib/" .. libName, libName)
-	local stripFlags = isMac and "-x" or "--strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr"
+	local stripEhFrame = (build.target or ""):find("musl", 1, true) and "" or " --remove-section=.eh_frame --remove-section=.eh_frame_hdr"
+	local stripFlags = isMac and "-x" or ("--strip-unneeded" .. stripEhFrame)
 
 	-- strip rewrites in place; write to a temp sibling and move it into place
 	-- (build:move -> fs.move -> rename, atomic) so a copy the process has
