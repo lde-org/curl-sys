@@ -290,6 +290,8 @@ function curl.download(url, path, opts)
 	end
 	lib.curl_easy_setopt(handle, OPT.WRITEDATA, f)
 
+	if opts and opts.timeout then setlong(OPT.TIMEOUT, opts.timeout) end
+
 	local progressCb
 	if opts and opts.progress then
 		progressCb = ffi.cast("curl_xferinfo_callback", function(_, dltotal, dlnow, ultotal, ulnow)

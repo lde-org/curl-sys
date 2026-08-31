@@ -125,6 +125,18 @@ test.it("download progress callback can abort", function()
 	test.equal(count, 1)
 end)
 
+test.it("download honors opts.timeout instead of hanging", function()
+	-- A blackhole IP drops the SYN, so the connect blocks until the total
+	-- timeout fires. Without the timeout option this transfer would hang
+	-- forever (regression: curl.download used to ignore opts.timeout).
+	local path = os.tmpname()
+	local ok, err = curl.download("http://10.255.255.1:81/stall", path, { timeout = 5 })
+	os.remove(path)
+	test.falsy(ok)
+	test.truthy(err)
+	test.truthy(err:find("Timeout", 1, true), "expected a timeout error, got: " .. tostring(err))
+end)
+
 -- ── Batch (multi) transfers ────────────────────────────────────────────────
 
 test.it("batch runs parallel GETs and preserves add order", function()
