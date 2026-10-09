@@ -97,7 +97,7 @@ if jit.os ~= "Windows" then
 		end
 
 		if not defaultCainfo then
-			local ok, pem = pcall(require, "cacert")
+			local ok, pem = pcall(require, "curl-sys.cacert")
 			if ok then
 				defaultCainfoBlob       = ffi.new("struct curl_blob")
 				defaultCainfoBlob.data  = ffi.cast("void *", pem)
