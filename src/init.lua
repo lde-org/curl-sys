@@ -215,6 +215,9 @@ local function request(opts)
 	end
 
 	local code = lib.curl_easy_perform(handle)
+	-- A callback holds one of the few slots LuaJIT has for them until it is freed, and the handle is
+	-- reset before it is used again, so nothing calls this one after the transfer.
+	if progressCb then progressCb:free() end
 	if code ~= 0 then
 		if slist then lib.curl_slist_free_all(slist) end
 		return nil, ffi.string(lib.curl_easy_strerror(code))
@@ -303,6 +306,7 @@ function curl.download(url, path, opts)
 	end
 
 	local code = lib.curl_easy_perform(handle)
+	if progressCb then progressCb:free() end
 	ffi.C.fclose(f)
 
 	if code ~= 0 then
@@ -420,6 +424,20 @@ function Batch.new(opts)
 	}, Batch)
 end
 
+--- Frees a transfer's callbacks once its handle is gone. LuaJIT has room for only so many C
+--- callbacks at once and never takes one back on its own, so a batch that kept them ran out after
+--- some hundreds of transfers and every later `add` failed with "too many callbacks".
+local function freeCallbacks(state)
+	if state.writeCb then
+		state.writeCb:free()
+		state.writeCb = nil
+	end
+	if state.progressCb then
+		state.progressCb:free()
+		state.progressCb = nil
+	end
+end
+
 --- Queue a transfer. Returns the 1-based index in add order (used to index `results()`).
 ---@param url string
 ---@param opts table?  -- { path?, method?, headers?, body?, timeout?, useragent?,
@@ -478,6 +496,7 @@ function Batch:add(url, opts)
 		if state.file then ffi.C.fclose(state.file) end
 		if state.slist then lib.curl_slist_free_all(state.slist) end
 		lib.curl_easy_cleanup(easy)
+		freeCallbacks(state)
 		self.order[#self.order + 1] = { result = { ok = false, err = "curl_multi_add_handle failed: " .. tostring(tonumber(code)) } }
 		self.doneCount = self.doneCount + 1
 		return #self.order
@@ -494,6 +513,7 @@ local function cleanupTransfer(self, easy, state)
 	if state.slist then lib.curl_slist_free_all(state.slist) end
 	lib.curl_multi_remove_handle(self.m, easy)
 	lib.curl_easy_cleanup(easy)
+	freeCallbacks(state)
 end
 
 --- Pump the multi handle and collect finished transfers.
